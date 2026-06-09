@@ -1,4 +1,4 @@
-import { optimizeInventory } from "../solver/placement.js";
+import { optimizeDriveBlocks } from "../solver/placement.js";
 
 self.addEventListener("message", (event) => {
   const { type, task } = event.data ?? {};
@@ -7,7 +7,7 @@ self.addEventListener("message", (event) => {
   }
 
   try {
-    const result = optimizeInventory(task, (progress) => {
+    const result = optimizeDriveBlocks(task, (progress) => {
       self.postMessage({
         type: "progress",
         progress

@@ -22,22 +22,27 @@ export type ShapeId =
 export type Rarity = "gold" | "purple" | "blue";
 
 export type StatKey =
-  | "attackPct"
-  | "attackFlat"
-  | "hpPct"
-  | "hpFlat"
-  | "defensePct"
-  | "defenseFlat"
   | "critRate"
   | "critDamage"
+  | "hpFlat"
+  | "hpPct"
+  | "attackFlat"
+  | "attackPct"
+  | "defenseFlat"
+  | "defensePct"
+  | "tiltIntensity"
+  | "ringFusionIntensity"
   | "genericDamageBonus"
-  | "typedDamageBonus"
-  | "sourceDamageBonus"
-  | "otherDamageBonus"
-  | "damageReduction"
-  | "extraDamage";
+  | "elementDamageBonus"
+  | "healingBonus"
+  | "psychicDamageBonus";
 
 export type StatMap = Partial<Record<StatKey, number>>;
+
+export type Affix = {
+  statKey: StatKey;
+  value: number;
+};
 
 export type DriveBlockShape = {
   id: ShapeId;
@@ -72,14 +77,25 @@ export type Weapon = {
   stats: StatMap;
 };
 
-export type Cartridge = {
+export type DriveBlockItem = {
   id: string;
   name: string;
   rarity: Rarity;
   shapeId: ShapeId;
-  stats: StatMap;
+  affixes: [Affix, Affix, Affix, Affix];
   enabled: boolean;
   locked: boolean;
+  legacyStats?: Record<string, number>;
+};
+
+export type Cassette = {
+  id: string;
+  name: string;
+  rarity: Rarity;
+  enabled: boolean;
+  mainAffix: Affix;
+  affixes: [Affix, Affix, Affix, Affix];
+  legacyStats?: Record<string, number>;
 };
 
 export type SkillProfile = {
@@ -97,13 +113,24 @@ export type AppState = {
   };
   characters: Character[];
   weapons: Weapon[];
-  inventory: Cartridge[];
+  driveBlocks: DriveBlockItem[];
+  cassettes: Cassette[];
+  statTables: StatTables;
+  requiredShapes: ShapeId[];
+  fillPriority: 2 | 3 | 4;
   selectedCharacterId: string;
   selectedWeaponId: string;
   skill: SkillProfile;
   invalidStats: StatKey[];
   topN: number;
   branchLimit: number;
+};
+
+export type StatTables = {
+  driveBlockBasePerCell: Record<Rarity, Pick<StatMap, "attackFlat" | "hpFlat">>;
+  driveBlockAffixPerCell: Record<Rarity, StatMap>;
+  cassetteMainAffixValues: Record<Rarity, StatMap>;
+  cassetteAffixValues: Record<Rarity, StatMap>;
 };
 
 export type DamageBreakdown = {
@@ -131,5 +158,6 @@ export type OptimizerResult = {
   rank: number;
   damage: DamageBreakdown;
   placements: Placement[];
-  itemIds: string[];
+  driveBlockIds: string[];
+  cassetteId: string | null;
 };

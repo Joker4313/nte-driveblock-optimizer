@@ -1,30 +1,49 @@
-import { calculateDamage, itemDamageDelta } from "../damage/calc.js";
+import { chooseBestCassette, itemDamageDelta } from "../damage/calc.js";
 import { BOARD_SIZE, SHAPE_BY_ID } from "../data/defaults.js";
 
-export function optimizeInventory(task, onProgress = () => {}) {
+export function optimizeDriveBlocks(task, onProgress = () => {}) {
   const startedAt = performance.now();
   const boardSet = new Set(task.boardCells.map(coordKey));
-  const lockedIds = new Set(task.inventory.filter((item) => item.locked).map((item) => item.id));
+  const driveBlocks = task.driveBlocks ?? task.inventory ?? [];
+  const lockedIds = new Set(driveBlocks.filter((item) => item.locked).map((item) => item.id));
   const invalidStats = new Set(task.invalidStats ?? []);
   const topN = Math.max(1, Number(task.topN ?? 5));
   const branchLimit = Math.max(1, Number(task.branchLimit ?? 100000));
+  const fillPriority = [2, 3, 4].includes(Number(task.fillPriority)) ? Number(task.fillPriority) : 3;
+  const requiredShapeCounts = countRequiredShapes(task.requiredShapes ?? []);
 
   let branches = 0;
   let pruned = 0;
   let lastProgressAt = 0;
   let abortedReason = "";
 
-  const selectedItems = task.inventory
+  const selectedBlocks = driveBlocks
     .filter((item) => item.enabled || item.locked)
-    .filter((item) => item.locked || !hasInvalidStat(item, invalidStats))
+    .filter((item) => item.locked || !hasInvalidAffix(item, invalidStats))
     .filter((item) => SHAPE_BY_ID[item.shapeId]);
 
-  const selectedIds = new Set(selectedItems.map((item) => item.id));
+  const cassetteCandidates = (task.cassettes ?? [])
+    .filter((cassette) => cassette.enabled)
+    .filter((cassette) => !hasInvalidAffix(cassette, invalidStats));
+
+  const selectedIds = new Set(selectedBlocks.map((item) => item.id));
   for (const lockedId of lockedIds) {
     if (!selectedIds.has(lockedId)) {
       return {
         status: "no-solution",
-        message: "存在被锁定但未参与计算的空幕。",
+        message: "存在被锁定但未参与计算的驱动块。",
+        results: [],
+        meta: { branches, pruned, elapsedMs: performance.now() - startedAt }
+      };
+    }
+  }
+
+  for (const [shapeId, count] of Object.entries(requiredShapeCounts)) {
+    const available = selectedBlocks.filter((item) => item.shapeId === shapeId).length;
+    if (available < count) {
+      return {
+        status: "no-solution",
+        message: "参与计算的驱动块不足以满足必选形状。",
         results: [],
         meta: { branches, pruned, elapsedMs: performance.now() - startedAt }
       };
@@ -40,11 +59,11 @@ export function optimizeInventory(task, onProgress = () => {}) {
     };
   }
 
-  const selectedArea = selectedItems.reduce((sum, item) => sum + SHAPE_BY_ID[item.shapeId].area, 0);
+  const selectedArea = selectedBlocks.reduce((sum, item) => sum + SHAPE_BY_ID[item.shapeId].area, 0);
   if (selectedArea < boardSet.size) {
     return {
       status: "no-solution",
-      message: "参与计算的空幕总面积不足。",
+      message: "参与计算的驱动块总面积不足。",
       results: [],
       meta: { branches, pruned, elapsedMs: performance.now() - startedAt }
     };
@@ -53,14 +72,13 @@ export function optimizeInventory(task, onProgress = () => {}) {
   const context = {
     character: task.character,
     weapon: task.weapon,
-    skill: task.skill
+    skill: task.skill,
+    statTables: task.statTables
   };
 
-  const scores = new Map(
-    selectedItems.map((item) => [item.id, itemDamageDelta(context, item)])
-  );
-  const itemsById = new Map(selectedItems.map((item) => [item.id, item]));
-  const candidateIds = selectedItems
+  const scores = new Map(selectedBlocks.map((item) => [item.id, itemDamageDelta(context, item)]));
+  const blocksById = new Map(selectedBlocks.map((item) => [item.id, item]));
+  const candidateIds = selectedBlocks
     .map((item) => item.id)
     .sort((a, b) => {
       const aLocked = lockedIds.has(a) ? 1 : 0;
@@ -68,9 +86,10 @@ export function optimizeInventory(task, onProgress = () => {}) {
       if (aLocked !== bLocked) {
         return bLocked - aLocked;
       }
-      const areaDiff = SHAPE_BY_ID[itemsById.get(b).shapeId].area - SHAPE_BY_ID[itemsById.get(a).shapeId].area;
-      if (areaDiff !== 0) {
-        return areaDiff;
+      const aPriority = SHAPE_BY_ID[blocksById.get(a).shapeId].area === fillPriority ? 1 : 0;
+      const bPriority = SHAPE_BY_ID[blocksById.get(b).shapeId].area === fillPriority ? 1 : 0;
+      if (aPriority !== bPriority) {
+        return bPriority - aPriority;
       }
       return (scores.get(b) ?? 0) - (scores.get(a) ?? 0);
     });
@@ -79,12 +98,12 @@ export function optimizeInventory(task, onProgress = () => {}) {
   const seenItemSets = new Set();
   const initialRequiredIds = new Set(candidateIds.filter((id) => lockedIds.has(id)));
 
-  function dfs(cellsLeft, unusedIds, requiredIds, placements) {
+  function dfs(cellsLeft, unusedIds, requiredIds, requiredShapesLeft, placements) {
     if (abortedReason) {
       return;
     }
     if (branches >= branchLimit) {
-      abortedReason = "方案过多，请增加锁定空幕或减少参与计算的库存数量。";
+      abortedReason = "方案过多，请增加锁定驱动块或减少参与计算的库存数量。";
       return;
     }
 
@@ -100,7 +119,7 @@ export function optimizeInventory(task, onProgress = () => {}) {
     }
 
     if (!cellsLeft.size) {
-      if (!requiredIds.size) {
+      if (!requiredIds.size && requiredShapeSatisfied(requiredShapesLeft)) {
         addResult(placements);
       }
       return;
@@ -118,10 +137,10 @@ export function optimizeInventory(task, onProgress = () => {}) {
     }
 
     const anchor = getTopLeft(cellsLeft);
-    const orderedIds = orderCandidates(unusedIds, requiredIds);
+    const orderedIds = orderCandidates(unusedIds, requiredIds, requiredShapesLeft);
 
     for (const itemId of orderedIds) {
-      const item = itemsById.get(itemId);
+      const item = blocksById.get(itemId);
       const shape = SHAPE_BY_ID[item.shapeId];
       branches += 1;
 
@@ -139,7 +158,8 @@ export function optimizeInventory(task, onProgress = () => {}) {
       nextUnused.delete(itemId);
       const nextRequired = new Set(requiredIds);
       nextRequired.delete(itemId);
-      dfs(nextCells, nextUnused, nextRequired, [
+      const nextRequiredShapes = decrementShapeRequirement(requiredShapesLeft, item.shapeId);
+      dfs(nextCells, nextUnused, nextRequired, nextRequiredShapes, [
         ...placements,
         {
           itemId,
@@ -152,12 +172,22 @@ export function optimizeInventory(task, onProgress = () => {}) {
     }
   }
 
-  function orderCandidates(unusedIds, requiredIds) {
+  function orderCandidates(unusedIds, requiredIds, requiredShapesLeft) {
     return candidateIds.filter((id) => unusedIds.has(id)).sort((a, b) => {
       const aRequired = requiredIds.has(a) ? 1 : 0;
       const bRequired = requiredIds.has(b) ? 1 : 0;
       if (aRequired !== bRequired) {
         return bRequired - aRequired;
+      }
+      const aShapeRequired = (requiredShapesLeft[blocksById.get(a).shapeId] ?? 0) > 0 ? 1 : 0;
+      const bShapeRequired = (requiredShapesLeft[blocksById.get(b).shapeId] ?? 0) > 0 ? 1 : 0;
+      if (aShapeRequired !== bShapeRequired) {
+        return bShapeRequired - aShapeRequired;
+      }
+      const aPriority = SHAPE_BY_ID[blocksById.get(a).shapeId].area === fillPriority ? 1 : 0;
+      const bPriority = SHAPE_BY_ID[blocksById.get(b).shapeId].area === fillPriority ? 1 : 0;
+      if (aPriority !== bPriority) {
+        return bPriority - aPriority;
       }
       return (scores.get(b) ?? 0) - (scores.get(a) ?? 0);
     });
@@ -167,7 +197,7 @@ export function optimizeInventory(task, onProgress = () => {}) {
     let requiredArea = 0;
     const optionalAreas = [];
     for (const id of unusedIds) {
-      const area = SHAPE_BY_ID[itemsById.get(id).shapeId].area;
+      const area = SHAPE_BY_ID[blocksById.get(id).shapeId].area;
       if (requiredIds.has(id)) {
         requiredArea += area;
       } else {
@@ -196,35 +226,32 @@ export function optimizeInventory(task, onProgress = () => {}) {
   function getMinArea(unusedIds) {
     let min = Infinity;
     for (const id of unusedIds) {
-      min = Math.min(min, SHAPE_BY_ID[itemsById.get(id).shapeId].area);
+      min = Math.min(min, SHAPE_BY_ID[blocksById.get(id).shapeId].area);
     }
     return Number.isFinite(min) ? min : 0;
   }
 
   function addResult(placements) {
-    const itemIds = placements.map((placement) => placement.itemId).sort();
-    const itemSetKey = itemIds.join("|");
+    const driveBlockIds = placements.map((placement) => placement.itemId).sort();
+    const itemSetKey = driveBlockIds.join("|");
     if (seenItemSets.has(itemSetKey)) {
       return;
     }
     seenItemSets.add(itemSetKey);
 
-    const items = itemIds.map((id) => itemsById.get(id));
-    const damage = calculateDamage({
-      character: task.character,
-      weapon: task.weapon,
-      skill: task.skill,
-      items
-    });
+    const placedBlocks = driveBlockIds.map((id) => blocksById.get(id));
+    const best = chooseBestCassette(context, cassetteCandidates, placedBlocks);
 
     results.push({
       rank: 0,
-      damage,
+      damage: best.damage,
       placements: placements.map((placement) => ({
         itemId: placement.itemId,
         cells: placement.cells
       })),
-      itemIds
+      driveBlockIds,
+      itemIds: driveBlockIds,
+      cassetteId: best.cassette?.id ?? null
     });
     results.sort((a, b) => b.damage.expectedDamage - a.damage.expectedDamage);
     if (results.length > topN) {
@@ -232,7 +259,7 @@ export function optimizeInventory(task, onProgress = () => {}) {
     }
   }
 
-  dfs(boardSet, new Set(candidateIds), initialRequiredIds, []);
+  dfs(boardSet, new Set(candidateIds), initialRequiredIds, requiredShapeCounts, []);
 
   const elapsedMs = performance.now() - startedAt;
   const ranked = results.map((result, index) => ({
@@ -265,6 +292,8 @@ export function optimizeInventory(task, onProgress = () => {}) {
     meta: { branches, pruned, elapsedMs }
   };
 }
+
+export const optimizeInventory = optimizeDriveBlocks;
 
 export function coordKey(coord) {
   return `${coord.r},${coord.c}`;
@@ -309,8 +338,36 @@ export function getTopLeft(cells) {
   return best;
 }
 
-function hasInvalidStat(item, invalidStats) {
-  return Object.entries(item.stats ?? {}).some(([key, value]) => invalidStats.has(key) && Number(value) !== 0);
+function hasInvalidAffix(item, invalidStats) {
+  const affixes = [...(item.affixes ?? [])];
+  if (item.mainAffix) {
+    affixes.push(item.mainAffix);
+  }
+  return affixes.some((affix) => invalidStats.has(affix?.statKey) && Number(affix?.value ?? 0) !== 0);
+}
+
+function countRequiredShapes(shapeIds) {
+  const counts = {};
+  for (const shapeId of shapeIds) {
+    if (SHAPE_BY_ID[shapeId]) {
+      counts[shapeId] = (counts[shapeId] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
+function decrementShapeRequirement(requiredShapesLeft, shapeId) {
+  if (!requiredShapesLeft[shapeId]) {
+    return requiredShapesLeft;
+  }
+  return {
+    ...requiredShapesLeft,
+    [shapeId]: requiredShapesLeft[shapeId] - 1
+  };
+}
+
+function requiredShapeSatisfied(requiredShapesLeft) {
+  return Object.values(requiredShapesLeft).every((count) => count <= 0);
 }
 
 function hasTinyIsland(cells, minArea) {
