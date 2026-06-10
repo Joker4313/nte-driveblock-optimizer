@@ -352,7 +352,6 @@ function renderCassettePanel() {
         <span class="counter">${state.cassettes.length} 件</span>
       </div>
       <div class="compact-form cassette-form">
-        <input id="newCassetteName" type="text" value="新卡带" aria-label="卡带名称" />
         <select id="newCassetteRarity" aria-label="品质">${RARITIES.map((rarity) => `<option value="${rarity.key}">${rarity.label}</option>`).join("")}</select>
         <button id="addCassette">新增</button>
       </div>
@@ -375,8 +374,7 @@ function renderCassetteItem(item) {
       </div>
       <div class="cassette-badge">卡带</div>
       <div class="inventory-main">
-        <div class="item-title-row">
-          <input class="item-name" value="${escapeAttribute(item.name)}" data-cassette-name="${escapeHtml(item.id)}" />
+        <div class="item-title-row cassette-title-row">
           <select data-cassette-rarity="${escapeHtml(item.id)}">${rarityOptions(item.rarity)}</select>
         </div>
         <div class="meta-line">
@@ -418,7 +416,7 @@ function renderRunPanel(currentDamage, currentCassette) {
           ? `
             <div class="metric-grid">
               <div><span>当前期望</span><strong>${formatNumber(currentDamage.expectedDamage)}</strong></div>
-              <div><span>自动卡带</span><strong>${escapeHtml(currentCassette?.name ?? "未佩戴")}</strong></div>
+              <div><span>自动卡带</span><strong>${currentCassette ? cassetteSummary(currentCassette) : "未佩戴"}</strong></div>
               <div><span>攻击</span><strong>${formatInteger(currentDamage.stats.attack)}</strong></div>
               <div><span>暴击率</span><strong>${formatPercent(currentDamage.stats.critRate)}</strong></div>
               <div><span>暴击伤害</span><strong>${formatPercent(currentDamage.stats.critDamage)}</strong></div>
@@ -454,7 +452,7 @@ function renderResult(result) {
           <span class="rank">#${result.rank}</span>
           <strong>${formatNumber(result.damage.expectedDamage)}</strong>
         </div>
-        <span>${result.damage.preferenceCount} 层偏好 / 卡带：${escapeHtml(cassette?.name ?? "未佩戴")} / ${expanded ? "收起" : "展开"}</span>
+        <span>${result.damage.preferenceCount} 层偏好 / 卡带：${cassette ? cassetteSummary(cassette) : "未佩戴"} / ${expanded ? "收起" : "展开"}</span>
       </div>
       <div class="result-summary-grid">
         <div>属性乘区 ${formatNumber(result.damage.attributeZone ?? result.damage.baseDamage)}</div>
@@ -533,7 +531,7 @@ function renderResultCassetteDetail(cassette) {
       <div class="detail-row">
         <div class="cassette-badge">卡带</div>
         <div>
-          <strong>${escapeHtml(cassette.name)} / <span class="rarity" style="--rarity-color: ${rarity.color}">${rarity.label}</span></strong>
+          <strong>卡带 / <span class="rarity" style="--rarity-color: ${rarity.color}">${rarity.label}</span></strong>
           <span>主词条 ${affixLabel(mainAffix)}</span>
           <span>副词条 ${affixSummaryForItem("cassette", cassette)}</span>
           <span>2件套属性增伤 ${formatPercent(CASSETTE_SET_ELEMENT_BONUS)}</span>
@@ -895,7 +893,7 @@ function bindBoardEvents() {
 
 function bindDriveBlockEvents() {
   document.querySelector("#addDriveBlock").addEventListener("click", () => {
-    state.driveBlocks.push({
+    state.driveBlocks.unshift({
       id: makeId("block"),
       name: "驱动块",
       rarity: document.querySelector("#newBlockRarity").value,
@@ -944,9 +942,9 @@ function bindDriveBlockEvents() {
 
 function bindCassetteEvents() {
   document.querySelector("#addCassette").addEventListener("click", () => {
-    state.cassettes.push({
+    state.cassettes.unshift({
       id: makeId("cassette"),
-      name: document.querySelector("#newCassetteName").value.trim() || "新卡带",
+      name: "卡带",
       rarity: document.querySelector("#newCassetteRarity").value,
       enabled: true,
       mainAffix: { statKey: "elementDamageBonus", value: 0 },
@@ -958,13 +956,6 @@ function bindCassetteEvents() {
   document.querySelectorAll("[data-cassette-enabled]").forEach((input) => {
     input.addEventListener("change", (event) => {
       getCassette(event.currentTarget.dataset.cassetteEnabled).enabled = event.currentTarget.checked;
-      clearResults("卡带库存已更新");
-      persistAndRender();
-    });
-  });
-  document.querySelectorAll("[data-cassette-name]").forEach((input) => {
-    input.addEventListener("change", (event) => {
-      getCassette(event.currentTarget.dataset.cassetteName).name = event.currentTarget.value.trim() || "卡带";
       clearResults("卡带库存已更新");
       persistAndRender();
     });
@@ -1241,6 +1232,12 @@ function formatAutoAffixValue(kind, id, statKey) {
 function affixLabel(affix) {
   if (!affix) return "";
   return `${STAT_BY_KEY[affix.statKey]?.label ?? affix.statKey} ${formatStatValue(affix.statKey, affix.value)}`;
+}
+
+function cassetteSummary(cassette) {
+  const rarity = RARITY_BY_KEY[cassette.rarity];
+  const mainAffix = resolveCassetteMainAffix(cassette, state.statTables);
+  return `${rarity?.label ?? "卡带"} / ${affixLabel(mainAffix)}`;
 }
 
 function legacySummary(item) {
