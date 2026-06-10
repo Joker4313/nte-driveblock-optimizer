@@ -1,12 +1,18 @@
 import { chooseBestCassette, itemDamageDelta } from "../damage/calc.js";
 import { BOARD_SIZE, SHAPE_BY_ID } from "../data/defaults.js";
 
+const RARITY_PRIORITY = {
+  gold: 3,
+  purple: 2,
+  blue: 1
+};
+
 export function optimizeDriveBlocks(task, onProgress = () => {}) {
   const startedAt = performance.now();
   const boardSet = new Set(task.boardCells.map(coordKey));
   const driveBlocks = task.driveBlocks ?? task.inventory ?? [];
   const lockedIds = new Set(driveBlocks.filter((item) => item.locked).map((item) => item.id));
-  const invalidStats = new Set(task.invalidStats ?? []);
+  const effectiveStats = task.effectiveStats ?? {};
   const topN = Math.max(1, Number(task.topN ?? 5));
   const branchLimit = Math.max(1, Number(task.branchLimit ?? 100000));
   const fillPriority = [2, 3, 4].includes(Number(task.fillPriority)) ? Number(task.fillPriority) : 3;
@@ -19,12 +25,10 @@ export function optimizeDriveBlocks(task, onProgress = () => {}) {
 
   const selectedBlocks = driveBlocks
     .filter((item) => item.enabled || item.locked)
-    .filter((item) => item.locked || !hasInvalidAffix(item, invalidStats))
     .filter((item) => SHAPE_BY_ID[item.shapeId]);
 
   const cassetteCandidates = (task.cassettes ?? [])
-    .filter((cassette) => cassette.enabled)
-    .filter((cassette) => !hasInvalidAffix(cassette, invalidStats));
+    .filter((cassette) => cassette.enabled);
 
   const selectedIds = new Set(selectedBlocks.map((item) => item.id));
   for (const lockedId of lockedIds) {
@@ -77,22 +81,11 @@ export function optimizeDriveBlocks(task, onProgress = () => {}) {
   };
 
   const scores = new Map(selectedBlocks.map((item) => [item.id, itemDamageDelta(context, item)]));
+  const qualityScores = new Map(selectedBlocks.map((item) => [item.id, getEffectiveAffixQuality(item, effectiveStats)]));
   const blocksById = new Map(selectedBlocks.map((item) => [item.id, item]));
   const candidateIds = selectedBlocks
     .map((item) => item.id)
-    .sort((a, b) => {
-      const aLocked = lockedIds.has(a) ? 1 : 0;
-      const bLocked = lockedIds.has(b) ? 1 : 0;
-      if (aLocked !== bLocked) {
-        return bLocked - aLocked;
-      }
-      const aPriority = SHAPE_BY_ID[blocksById.get(a).shapeId].area === fillPriority ? 1 : 0;
-      const bPriority = SHAPE_BY_ID[blocksById.get(b).shapeId].area === fillPriority ? 1 : 0;
-      if (aPriority !== bPriority) {
-        return bPriority - aPriority;
-      }
-      return (scores.get(b) ?? 0) - (scores.get(a) ?? 0);
-    });
+    .sort(compareCandidateIds);
 
   const results = [];
   const seenItemSets = new Set();
@@ -184,13 +177,40 @@ export function optimizeDriveBlocks(task, onProgress = () => {}) {
       if (aShapeRequired !== bShapeRequired) {
         return bShapeRequired - aShapeRequired;
       }
-      const aPriority = SHAPE_BY_ID[blocksById.get(a).shapeId].area === fillPriority ? 1 : 0;
-      const bPriority = SHAPE_BY_ID[blocksById.get(b).shapeId].area === fillPriority ? 1 : 0;
-      if (aPriority !== bPriority) {
-        return bPriority - aPriority;
-      }
-      return (scores.get(b) ?? 0) - (scores.get(a) ?? 0);
+      return compareCandidateIds(a, b);
     });
+  }
+
+  function compareCandidateIds(a, b) {
+    const aLocked = lockedIds.has(a) ? 1 : 0;
+    const bLocked = lockedIds.has(b) ? 1 : 0;
+    if (aLocked !== bLocked) {
+      return bLocked - aLocked;
+    }
+
+    const aBlock = blocksById.get(a);
+    const bBlock = blocksById.get(b);
+    const rarityDiff = (RARITY_PRIORITY[bBlock.rarity] ?? 0) - (RARITY_PRIORITY[aBlock.rarity] ?? 0);
+    if (rarityDiff) {
+      return rarityDiff;
+    }
+
+    const aQuality = qualityScores.get(a) ?? { count: 0, score: 0 };
+    const bQuality = qualityScores.get(b) ?? { count: 0, score: 0 };
+    if (aQuality.count !== bQuality.count) {
+      return bQuality.count - aQuality.count;
+    }
+    if (aQuality.score !== bQuality.score) {
+      return bQuality.score - aQuality.score;
+    }
+
+    const aPriority = SHAPE_BY_ID[aBlock.shapeId].area === fillPriority ? 1 : 0;
+    const bPriority = SHAPE_BY_ID[bBlock.shapeId].area === fillPriority ? 1 : 0;
+    if (aPriority !== bPriority) {
+      return bPriority - aPriority;
+    }
+
+    return (scores.get(b) ?? 0) - (scores.get(a) ?? 0);
   }
 
   function areaFeasible(areaLeft, unusedIds, requiredIds) {
@@ -338,14 +358,6 @@ export function getTopLeft(cells) {
   return best;
 }
 
-function hasInvalidAffix(item, invalidStats) {
-  const affixes = [...(item.affixes ?? [])];
-  if (item.mainAffix) {
-    affixes.push(item.mainAffix);
-  }
-  return affixes.some((affix) => invalidStats.has(affix?.statKey) && Number(affix?.value ?? 0) !== 0);
-}
-
 function countRequiredShapes(shapeIds) {
   const counts = {};
   for (const shapeId of shapeIds) {
@@ -354,6 +366,20 @@ function countRequiredShapes(shapeIds) {
     }
   }
   return counts;
+}
+
+function getEffectiveAffixQuality(item, effectiveStats) {
+  let count = 0;
+  let score = 0;
+  for (const affix of item.affixes ?? []) {
+    const config = effectiveStats?.[affix?.statKey];
+    if (!config?.enabled) {
+      continue;
+    }
+    count += 1;
+    score += Number(config.weight ?? 1);
+  }
+  return { count, score };
 }
 
 function decrementShapeRequirement(requiredShapesLeft, shapeId) {

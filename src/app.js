@@ -2,6 +2,8 @@ import {
   BOARD_SIZE,
   CASSETTE_AFFIX_KEYS,
   CASSETTE_MAIN_AFFIX_KEYS,
+  CASSETTE_SET_ELEMENT_BONUS,
+  CHARACTER_PREFERENCE_STAT_KEYS,
   DRIVE_BLOCK_AFFIX_KEYS,
   RARITIES,
   RARITY_BY_KEY,
@@ -30,6 +32,7 @@ import {
 
 let state = loadState();
 let results = [];
+let expandedResultKey = null;
 let runStatus = {
   mode: "idle",
   message: "就绪",
@@ -79,7 +82,6 @@ function render() {
         ${renderWeaponPanel(weapon)}
         ${renderSkillPanel()}
         ${renderFilterPanel()}
-        ${renderDataTablePanel()}
       </section>
 
       <section class="panel board-panel">
@@ -100,11 +102,12 @@ function render() {
   bindWeaponEvents();
   bindSkillEvents();
   bindFilterEvents();
-  bindDataTableEvents();
+  bindShapePickerEvents();
   bindBoardEvents();
   bindDriveBlockEvents();
   bindCassetteEvents();
   bindRunEvents();
+  bindResultEvents();
 }
 
 function renderCharacterPanel(character) {
@@ -142,7 +145,7 @@ function renderCharacterPanel(character) {
         <label class="field">
           <span>叠层属性</span>
           <select data-character-field="preference.stat">
-            ${statOptions(DRIVE_BLOCK_AFFIX_KEYS, character.preference.stat)}
+            ${statOptions(CHARACTER_PREFERENCE_STAT_KEYS, character.preference.stat)}
           </select>
         </label>
         ${numberInput("每层数值", formatStatInput(character.preference.stat, character.preference.value), "character", "preference.value", statFormat(character.preference.stat))}
@@ -195,7 +198,6 @@ function renderSkillPanel() {
 }
 
 function renderFilterPanel() {
-  const invalid = new Set(state.invalidStats);
   return `
     <section class="section">
       <div class="section-header"><h2>计算控制</h2></div>
@@ -211,67 +213,29 @@ function renderFilterPanel() {
           </select>
         </label>
       </div>
-      <div class="check-list">
-        ${STAT_DEFS.map((stat) => `
-          <label class="check-item">
-            <input type="checkbox" data-invalid-stat="${stat.key}" ${invalid.has(stat.key) ? "checked" : ""} />
-            <span>${stat.label}</span>
-          </label>
-        `).join("")}
+      <div class="section-header compact">
+        <h3>有效词条权重</h3>
       </div>
-    </section>
-  `;
-}
-
-function renderDataTablePanel() {
-  return `
-    <section class="section data-table-section">
-      <div class="section-header">
-        <h2>数据表</h2>
-      </div>
-      <div class="data-table-block">
-        <h3>驱动块每格基础属性</h3>
-        <div class="table-grid base-table">
-          <span></span>
-          ${RARITIES.map((rarity) => `<strong>${rarity.label}</strong>`).join("")}
-          ${["attackFlat", "hpFlat"].map((statKey) => `
-            <span>${STAT_BY_KEY[statKey].label}</span>
-            ${RARITIES.map((rarity) => dataTableInput("driveBlockBasePerCell", rarity.key, statKey)).join("")}
-          `).join("")}
-        </div>
-      </div>
-      <div class="data-table-block">
-        <h3>驱动块每格词条数值</h3>
-        <div class="table-grid stat-table">
-          <span></span>
-          ${RARITIES.map((rarity) => `<strong>${rarity.label}</strong>`).join("")}
-          ${DRIVE_BLOCK_AFFIX_KEYS.map((statKey) => `
-            <span>${STAT_BY_KEY[statKey].label}</span>
-            ${RARITIES.map((rarity) => dataTableInput("driveBlockAffixPerCell", rarity.key, statKey)).join("")}
-          `).join("")}
-        </div>
-      </div>
-      <div class="data-table-block">
-        <h3>卡带主词条固定数值</h3>
-        <div class="table-grid stat-table">
-          <span></span>
-          ${RARITIES.map((rarity) => `<strong>${rarity.label}</strong>`).join("")}
-          ${CASSETTE_MAIN_AFFIX_KEYS.map((statKey) => `
-            <span>${STAT_BY_KEY[statKey].label}</span>
-            ${RARITIES.map((rarity) => dataTableInput("cassetteMainAffixValues", rarity.key, statKey)).join("")}
-          `).join("")}
-        </div>
-      </div>
-      <div class="data-table-block">
-        <h3>卡带副词条固定数值</h3>
-        <div class="table-grid stat-table">
-          <span></span>
-          ${RARITIES.map((rarity) => `<strong>${rarity.label}</strong>`).join("")}
-          ${CASSETTE_AFFIX_KEYS.map((statKey) => `
-            <span>${STAT_BY_KEY[statKey].label}</span>
-            ${RARITIES.map((rarity) => dataTableInput("cassetteAffixValues", rarity.key, statKey)).join("")}
-          `).join("")}
-        </div>
+      <div class="effective-stat-list">
+        ${DRIVE_BLOCK_AFFIX_KEYS.map((statKey) => {
+          const config = state.effectiveStats?.[statKey] ?? { enabled: false, weight: 1 };
+          return `
+            <label class="effective-stat-item">
+              <span class="check-item">
+                <input type="checkbox" data-effective-stat-enabled="${statKey}" ${config.enabled ? "checked" : ""} />
+                <span>${STAT_BY_KEY[statKey].label}</span>
+              </span>
+              <input
+                type="number"
+                min="0.1"
+                step="0.1"
+                value="${escapeAttribute(config.weight ?? 1)}"
+                data-effective-stat-weight="${statKey}"
+                aria-label="${escapeAttribute(STAT_BY_KEY[statKey].label)}权重"
+              />
+            </label>
+          `;
+        }).join("")}
       </div>
     </section>
   `;
@@ -310,9 +274,9 @@ function renderBoardPanel() {
         <div class="section-header compact">
           <h3>必选形状</h3>
           <button class="small" id="clearRequiredShapes">清空</button>
-        </div>
-        <div class="required-add-row">
-          <select id="requiredShapeSelect">${SHAPES.map((shape) => `<option value="${shape.id}">${shape.name}</option>`).join("")}</select>
+      </div>
+      <div class="required-add-row">
+          ${renderShapePicker("requiredShapeSelect", SHAPES[0].id, "required-shape")}
           <button id="addRequiredShape">添加</button>
         </div>
         <div class="pill-row">
@@ -333,10 +297,9 @@ function renderDriveBlockPanel() {
         <h2>驱动块库存</h2>
         <span class="counter">${state.driveBlocks.length} 件</span>
       </div>
-      <div class="compact-form">
-        <input id="newBlockName" type="text" value="新驱动块" aria-label="驱动块名称" />
+      <div class="compact-form block-form">
         <select id="newBlockRarity" aria-label="品质">${RARITIES.map((rarity) => `<option value="${rarity.key}">${rarity.label}</option>`).join("")}</select>
-        <select id="newBlockShape" aria-label="形状">${SHAPES.map((shape) => `<option value="${shape.id}">${shape.name}</option>`).join("")}</select>
+        ${renderShapePicker("newBlockShape", SHAPES[0].id, "new-block")}
         <button id="addDriveBlock">新增</button>
       </div>
       <div class="inventory-list">
@@ -363,10 +326,9 @@ function renderDriveBlockItem(item) {
       </div>
       ${renderShapeMini(item.shapeId)}
       <div class="inventory-main">
-        <div class="item-title-row">
-          <input class="item-name" value="${escapeAttribute(item.name)}" data-block-name="${escapeHtml(item.id)}" />
+        <div class="item-title-row block-title-row">
           <select data-block-rarity="${escapeHtml(item.id)}">${rarityOptions(item.rarity)}</select>
-          <select data-block-shape="${escapeHtml(item.id)}">${shapeOptions(item.shapeId)}</select>
+          ${renderShapePicker(`blockShape-${item.id}`, item.shapeId, `block:${item.id}`)}
         </div>
         <div class="meta-line">
           <span class="rarity" style="--rarity-color: ${rarity.color}">${rarity.label}</span>
@@ -389,7 +351,7 @@ function renderCassettePanel() {
         <h2>卡带库存</h2>
         <span class="counter">${state.cassettes.length} 件</span>
       </div>
-      <div class="compact-form">
+      <div class="compact-form cassette-form">
         <input id="newCassetteName" type="text" value="新卡带" aria-label="卡带名称" />
         <select id="newCassetteRarity" aria-label="品质">${RARITIES.map((rarity) => `<option value="${rarity.key}">${rarity.label}</option>`).join("")}</select>
         <button id="addCassette">新增</button>
@@ -461,6 +423,8 @@ function renderRunPanel(currentDamage, currentCassette) {
               <div><span>暴击率</span><strong>${formatPercent(currentDamage.stats.critRate)}</strong></div>
               <div><span>暴击伤害</span><strong>${formatPercent(currentDamage.stats.critDamage)}</strong></div>
               <div><span>增伤区</span><strong>${formatMultiplier(currentDamage.damageZone)}</strong></div>
+              <div><span>双暴期望</span><strong>${formatMultiplier(currentDamage.critExpectation)}</strong></div>
+              <div><span>特殊收益</span><strong>${formatMultiplier(currentDamage.specialZone)}</strong></div>
             </div>
           `
           : ""
@@ -481,31 +445,101 @@ function renderResult(result) {
   const cassetteMap = new Map(state.cassettes.map((item) => [item.id, item]));
   const blocks = (result.driveBlockIds ?? result.itemIds ?? []).map((id) => blockMap.get(id)).filter(Boolean);
   const cassette = result.cassetteId ? cassetteMap.get(result.cassetteId) : null;
+  const key = resultKey(result);
+  const expanded = expandedResultKey === key;
   return `
-    <article class="result-card">
+    <article class="result-card ${expanded ? "expanded" : ""}" data-result-toggle="${escapeAttribute(key)}" role="button" tabindex="0">
       <div class="result-head">
         <div>
           <span class="rank">#${result.rank}</span>
           <strong>${formatNumber(result.damage.expectedDamage)}</strong>
         </div>
-        <span>${result.damage.preferenceCount} 层偏好 / 卡带：${escapeHtml(cassette?.name ?? "未佩戴")}</span>
+        <span>${result.damage.preferenceCount} 层偏好 / 卡带：${escapeHtml(cassette?.name ?? "未佩戴")} / ${expanded ? "收起" : "展开"}</span>
       </div>
-      <div class="result-body">
-        ${renderResultBoard(result)}
-        <div class="result-stats">
-          <div>基础伤害 ${formatNumber(result.damage.baseDamage)}</div>
-          <div>增伤区 ${formatMultiplier(result.damage.damageZone)}</div>
-          <div>暴击期望 ${formatMultiplier(result.damage.critExpectation)}</div>
-          <div>攻击 ${formatInteger(result.damage.stats.attack)}</div>
-          <div>暴击率 ${formatPercent(result.damage.stats.critRate)}</div>
-          <div>暴击伤害 ${formatPercent(result.damage.stats.critDamage)}</div>
+      <div class="result-summary-grid">
+        <div>属性乘区 ${formatNumber(result.damage.attributeZone ?? result.damage.baseDamage)}</div>
+        <div>增伤区 ${formatMultiplier(result.damage.damageZone)}</div>
+        <div>暴击期望 ${formatMultiplier(result.damage.critExpectation)}</div>
+        <div>特殊收益 ${formatMultiplier(result.damage.specialZone)}</div>
+        <div>攻击 ${formatInteger(result.damage.stats.attack)}</div>
+        <div>暴击 ${formatPercent(result.damage.stats.critRate)} / ${formatPercent(result.damage.stats.critDamage)}</div>
+      </div>
+      ${
+        expanded
+          ? `
+            <div class="result-body result-detail">
+              ${renderResultBoard(result)}
+              <div class="result-stats">
+                <div>基础伤害 ${formatNumber(result.damage.baseDamage)}</div>
+                <div>属性乘区 ${formatNumber(result.damage.attributeZone ?? result.damage.baseDamage)}</div>
+                <div>增伤区 ${formatMultiplier(result.damage.damageZone)}</div>
+                <div>暴击期望 ${formatMultiplier(result.damage.critExpectation)}</div>
+                <div>特殊收益 ${formatMultiplier(result.damage.specialZone)}</div>
+                <div>生命 ${formatInteger(result.damage.stats.hp)}</div>
+                <div>防御 ${formatInteger(result.damage.stats.defense)}</div>
+                <div>环合强度 ${formatInteger(result.damage.stats.ringFusionIntensity)}</div>
+              </div>
+            </div>
+            ${renderResultBlockDetails(blocks)}
+            ${renderResultCassetteDetail(cassette)}
+          `
+          : ""
+      }
+    </article>
+  `;
+}
+
+function resultKey(result) {
+  const ids = result.driveBlockIds ?? result.itemIds ?? [];
+  return `${ids.join("|")}::${result.cassetteId ?? "none"}::${result.rank ?? ""}`;
+}
+
+function renderResultBlockDetails(blocks) {
+  return `
+    <div class="detail-list">
+      <h4>驱动块</h4>
+      ${blocks.map((item) => {
+        const shape = SHAPE_BY_ID[item.shapeId];
+        const rarity = RARITY_BY_KEY[item.rarity];
+        return `
+          <div class="detail-row">
+            ${renderShapeMini(item.shapeId)}
+            <div>
+              <strong><span class="rarity" style="--rarity-color: ${rarity.color}">${rarity.label}</span> ${shape?.name ?? item.shapeId}</strong>
+              <span>${baseStatSummary(item)}</span>
+              <span>${affixSummaryForItem("block", item)}</span>
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderResultCassetteDetail(cassette) {
+  if (!cassette) {
+    return `
+      <div class="detail-list">
+        <h4>卡带</h4>
+        <div class="detail-row"><div><strong>未佩戴</strong></div></div>
+      </div>
+    `;
+  }
+  const rarity = RARITY_BY_KEY[cassette.rarity];
+  const mainAffix = resolveCassetteMainAffix(cassette, state.statTables);
+  return `
+    <div class="detail-list">
+      <h4>卡带</h4>
+      <div class="detail-row">
+        <div class="cassette-badge">卡带</div>
+        <div>
+          <strong>${escapeHtml(cassette.name)} / <span class="rarity" style="--rarity-color: ${rarity.color}">${rarity.label}</span></strong>
+          <span>主词条 ${affixLabel(mainAffix)}</span>
+          <span>副词条 ${affixSummaryForItem("cassette", cassette)}</span>
+          <span>2件套属性增伤 ${formatPercent(CASSETTE_SET_ELEMENT_BONUS)}</span>
         </div>
       </div>
-      <div class="pill-row">
-        ${blocks.map((item) => `<span class="pill">${escapeHtml(item.name)}</span>`).join("")}
-        <span class="pill cassette-pill">卡带：${escapeHtml(cassette?.name ?? "未佩戴")}</span>
-      </div>
-    </article>
+    </div>
   `;
 }
 
@@ -548,6 +582,38 @@ function renderAffixEditor(kind, id, affixes, allowedKeys) {
   `;
 }
 
+function renderShapePicker(id, selected, target) {
+  const selectedShape = SHAPE_BY_ID[selected] ?? SHAPES[0];
+  return `
+    <div class="shape-picker" data-shape-picker="${escapeAttribute(target)}" data-shape-value="${escapeAttribute(selectedShape.id)}">
+      <button
+        type="button"
+        class="shape-picker-trigger"
+        id="${escapeAttribute(id)}"
+        data-shape-trigger="${escapeAttribute(target)}"
+        aria-label="形状：${escapeAttribute(selectedShape.name)}"
+        title="${escapeAttribute(selectedShape.name)}"
+      >
+        ${renderShapeMini(selectedShape.id)}
+      </button>
+      <div class="shape-picker-menu" role="listbox" aria-label="选择形状">
+        ${SHAPES.map((shape) => `
+          <button
+            type="button"
+            class="shape-picker-option ${shape.id === selectedShape.id ? "selected" : ""}"
+            data-shape-option="${escapeAttribute(target)}"
+            data-shape-value="${escapeAttribute(shape.id)}"
+            aria-label="${escapeAttribute(shape.name)}"
+            title="${escapeAttribute(shape.name)}"
+          >
+            ${renderShapeMini(shape.id)}
+          </button>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderShapeMini(shapeId) {
   const shape = SHAPE_BY_ID[shapeId];
   const rows = shape.cells.map((cell) => cell.r);
@@ -561,6 +627,63 @@ function renderShapeMini(shapeId) {
       ${shape.cells.map((cell) => `<i style="grid-row:${cell.r - minR + 1}; grid-column:${cell.c - minC + 1};"></i>`).join("")}
     </span>
   `;
+}
+
+function bindShapePickerEvents() {
+  document.querySelectorAll("[data-shape-trigger]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const picker = event.currentTarget.closest("[data-shape-picker]");
+      const wasOpen = picker.classList.contains("open");
+      closeShapePickers();
+      picker.classList.toggle("open", !wasOpen);
+    });
+  });
+
+  document.querySelectorAll("[data-shape-option]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const option = event.currentTarget;
+      const picker = option.closest("[data-shape-picker]");
+      const target = picker.dataset.shapePicker;
+      const shapeId = option.dataset.shapeValue;
+      setShapePickerValue(picker, shapeId);
+
+      if (target === "required-shape" || target === "new-block") {
+        closeShapePickers();
+        return;
+      }
+
+      if (target.startsWith("block:")) {
+        const item = getDriveBlock(target.slice("block:".length));
+        item.shapeId = shapeId;
+        clearResults("驱动块库存已更新");
+        persistAndRender();
+      }
+    });
+  });
+
+  document.addEventListener("click", closeShapePickers, { once: true });
+}
+
+function setShapePickerValue(picker, shapeId) {
+  const shape = SHAPE_BY_ID[shapeId] ?? SHAPES[0];
+  picker.dataset.shapeValue = shape.id;
+  const trigger = picker.querySelector("[data-shape-trigger]");
+  trigger.innerHTML = renderShapeMini(shape.id);
+  trigger.setAttribute("aria-label", `形状：${shape.name}`);
+  trigger.title = shape.name;
+  picker.querySelectorAll("[data-shape-option]").forEach((option) => {
+    option.classList.toggle("selected", option.dataset.shapeValue === shape.id);
+  });
+}
+
+function closeShapePickers() {
+  document.querySelectorAll(".shape-picker.open").forEach((picker) => picker.classList.remove("open"));
+}
+
+function getShapePickerValue(target) {
+  return document.querySelector(`[data-shape-picker="${target}"]`)?.dataset.shapeValue ?? SHAPES[0].id;
 }
 
 function bindGlobalActions() {
@@ -683,14 +806,28 @@ function bindFilterEvents() {
       persistAndRender();
     });
   });
-  document.querySelectorAll("[data-invalid-stat]").forEach((input) => {
+  document.querySelectorAll("[data-effective-stat-enabled]").forEach((input) => {
     input.addEventListener("change", (event) => {
-      const key = event.currentTarget.dataset.invalidStat;
-      const next = new Set(state.invalidStats);
-      if (event.currentTarget.checked) next.add(key);
-      else next.delete(key);
-      state.invalidStats = [...next];
-      clearResults("无效词条已更新");
+      const key = event.currentTarget.dataset.effectiveStatEnabled;
+      const current = state.effectiveStats?.[key] ?? { enabled: false, weight: 1 };
+      state.effectiveStats = {
+        ...(state.effectiveStats ?? {}),
+        [key]: { ...current, enabled: event.currentTarget.checked }
+      };
+      clearResults("有效词条已更新");
+      persistAndRender();
+    });
+  });
+  document.querySelectorAll("[data-effective-stat-weight]").forEach((input) => {
+    input.addEventListener("change", (event) => {
+      const key = event.currentTarget.dataset.effectiveStatWeight;
+      const current = state.effectiveStats?.[key] ?? { enabled: false, weight: 1 };
+      const weight = Number(event.currentTarget.value);
+      state.effectiveStats = {
+        ...(state.effectiveStats ?? {}),
+        [key]: { ...current, weight: Number.isFinite(weight) && weight > 0 ? weight : 1 }
+      };
+      clearResults("有效词条权重已更新");
       persistAndRender();
     });
   });
@@ -711,7 +848,7 @@ function bindBoardEvents() {
     persistAndRender();
   });
   document.querySelector("#addRequiredShape").addEventListener("click", () => {
-    state.requiredShapes.push(document.querySelector("#requiredShapeSelect").value);
+    state.requiredShapes.push(getShapePickerValue("required-shape"));
     clearResults("必选形状已更新");
     persistAndRender();
   });
@@ -756,26 +893,13 @@ function bindBoardEvents() {
   });
 }
 
-function bindDataTableEvents() {
-  document.querySelectorAll("[data-table-section]").forEach((input) => {
-    input.addEventListener("change", (event) => {
-      const section = event.currentTarget.dataset.tableSection;
-      const rarity = event.currentTarget.dataset.tableRarity;
-      const statKey = event.currentTarget.dataset.tableStat;
-      state.statTables[section][rarity][statKey] = readStatInputValue(event.currentTarget.value, statKey);
-      clearResults("数据表已更新");
-      persistAndRender();
-    });
-  });
-}
-
 function bindDriveBlockEvents() {
   document.querySelector("#addDriveBlock").addEventListener("click", () => {
     state.driveBlocks.push({
       id: makeId("block"),
-      name: document.querySelector("#newBlockName").value.trim() || "新驱动块",
+      name: "驱动块",
       rarity: document.querySelector("#newBlockRarity").value,
-      shapeId: document.querySelector("#newBlockShape").value,
+      shapeId: getShapePickerValue("new-block"),
       enabled: true,
       locked: false,
       affixes: makeAffixes()
@@ -801,23 +925,9 @@ function bindDriveBlockEvents() {
       persistAndRender();
     });
   });
-  document.querySelectorAll("[data-block-name]").forEach((input) => {
-    input.addEventListener("change", (event) => {
-      getDriveBlock(event.currentTarget.dataset.blockName).name = event.currentTarget.value.trim() || "驱动块";
-      clearResults("驱动块库存已更新");
-      persistAndRender();
-    });
-  });
   document.querySelectorAll("[data-block-rarity]").forEach((select) => {
     select.addEventListener("change", (event) => {
       getDriveBlock(event.currentTarget.dataset.blockRarity).rarity = event.currentTarget.value;
-      clearResults("驱动块库存已更新");
-      persistAndRender();
-    });
-  });
-  document.querySelectorAll("[data-block-shape]").forEach((select) => {
-    select.addEventListener("change", (event) => {
-      getDriveBlock(event.currentTarget.dataset.blockShape).shapeId = event.currentTarget.value;
       clearResults("驱动块库存已更新");
       persistAndRender();
     });
@@ -911,9 +1021,26 @@ function bindRunEvents() {
   });
 }
 
+function bindResultEvents() {
+  document.querySelectorAll("[data-result-toggle]").forEach((card) => {
+    const toggle = () => {
+      const key = card.dataset.resultToggle;
+      expandedResultKey = expandedResultKey === key ? null : key;
+      render();
+    };
+    card.addEventListener("click", toggle);
+    card.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      toggle();
+    });
+  });
+}
+
 function runOptimizer() {
   stopWorker();
   results = [];
+  expandedResultKey = null;
   runStatus = { mode: "running", message: "正在计算", branches: 0, pruned: 0, elapsedMs: 0 };
   render();
 
@@ -968,7 +1095,7 @@ function runOptimizer() {
       statTables: state.statTables,
       requiredShapes: state.requiredShapes,
       fillPriority: state.fillPriority,
-      invalidStats: state.invalidStats,
+      effectiveStats: state.effectiveStats,
       topN: state.topN,
       branchLimit: state.branchLimit
     }
@@ -994,18 +1121,12 @@ function stopWorker() {
 
 function clearResults(message) {
   results = [];
+  expandedResultKey = null;
   runStatus = { mode: "idle", message, branches: 0, pruned: 0, elapsedMs: 0 };
 }
 
 function selectableCassettes() {
-  const invalid = new Set(state.invalidStats);
-  return state.cassettes.filter((cassette) => cassette.enabled && !hasInvalidAffix(cassette, invalid));
-}
-
-function hasInvalidAffix(item, invalidStats) {
-  const affixes = [...(item.affixes ?? [])];
-  if (item.mainAffix) affixes.push(item.mainAffix);
-  return affixes.some((affix) => invalidStats.has(affix?.statKey) && Number(affix?.value ?? 0) !== 0);
+  return state.cassettes.filter((cassette) => cassette.enabled);
 }
 
 function setBoardCell(key, active) {
@@ -1092,25 +1213,6 @@ function rarityOptions(selected) {
   return RARITIES.map((rarity) => `<option value="${rarity.key}" ${rarity.key === selected ? "selected" : ""}>${rarity.label}</option>`).join("");
 }
 
-function shapeOptions(selected) {
-  return SHAPES.map((shape) => `<option value="${shape.id}" ${shape.id === selected ? "selected" : ""}>${shape.name}</option>`).join("");
-}
-
-function dataTableInput(section, rarity, statKey) {
-  const value = state.statTables?.[section]?.[rarity]?.[statKey] ?? 0;
-  return `
-    <input
-      type="number"
-      step="0.01"
-      value="${escapeAttribute(formatStatInput(statKey, value))}"
-      data-table-section="${section}"
-      data-table-rarity="${rarity}"
-      data-table-stat="${statKey}"
-      data-format="${statFormat(statKey)}"
-    />
-  `;
-}
-
 function baseStatSummary(item) {
   const stats = getDriveBlockBaseStats(item, state.statTables);
   return `基础 ${STAT_BY_KEY.attackFlat.label} ${formatInteger(stats.attackFlat)} / ${STAT_BY_KEY.hpFlat.label} ${formatInteger(stats.hpFlat)}`;
@@ -1145,11 +1247,6 @@ function legacySummary(item) {
   const entries = Object.entries(item.legacyStats ?? {}).filter(([, value]) => Number(value) !== 0);
   if (!entries.length) return "";
   return `<span>旧字段 ${entries.map(([key, value]) => `${escapeHtml(key)} ${formatNumber(value)}`).join(" / ")}</span>`;
-}
-
-function readStatInputValue(value, statKey) {
-  const numericValue = Number(value || 0);
-  return statFormat(statKey) === "percent" ? numericValue / 100 : numericValue;
 }
 
 function formatStatInput(statKey, value) {

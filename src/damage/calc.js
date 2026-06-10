@@ -1,4 +1,7 @@
 import {
+  CASSETTE_SET_ELEMENT_BONUS,
+  CHARACTER_PREFERENCE_STAT_KEYS,
+  DEFAULT_DAMAGE_CONSTANTS,
   SHAPE_BY_ID,
   STAT_DEFS,
   getDriveBlockBaseStats,
@@ -33,6 +36,7 @@ export function sourceToStats(source, statTables) {
   };
 
   add(source?.stats);
+  add(source?.specialStats);
   if (source?.shapeId) {
     add(getDriveBlockBaseStats(source, statTables));
     add(affixesToStats(resolveDriveBlockAffixes(source, statTables)));
@@ -56,7 +60,16 @@ export function sumStats(sources, statTables) {
   return totals;
 }
 
-export function calculateDamage({ character, weapon, skill, driveBlocks, cassette, items, statTables }) {
+export function calculateDamage({
+  character,
+  weapon,
+  skill,
+  driveBlocks,
+  cassette,
+  items,
+  statTables,
+  damageConstants = DEFAULT_DAMAGE_CONSTANTS
+}) {
   const blockItems = driveBlocks ?? items ?? [];
   const statTotals = sumStats([weapon, ...blockItems, cassette].filter(Boolean), statTables);
   const preference = character.preference;
@@ -65,7 +78,7 @@ export function calculateDamage({ character, weapon, skill, driveBlocks, cassett
     return shape?.kind === preference.shapeKind;
   }).length;
 
-  if (preference?.stat) {
+  if (CHARACTER_PREFERENCE_STAT_KEYS.includes(preference?.stat)) {
     statTotals[preference.stat] =
       Number(statTotals[preference.stat] ?? 0) + preferenceCount * Number(preference.value ?? 0);
   }
@@ -84,34 +97,47 @@ export function calculateDamage({ character, weapon, skill, driveBlocks, cassett
       Number(statTotals.defenseFlat ?? 0)
   );
 
-  const baseDamage =
+  const attributeZone =
     Number(skill.attackMultiplier ?? 0) * attack +
     Number(skill.hpMultiplier ?? 0) * hp +
     Number(skill.defenseMultiplier ?? 0) * defense +
     Number(skill.extraDamage ?? 0);
+  const baseDamage = attributeZone;
 
   const damageZone =
     1 +
     Number(statTotals.genericDamageBonus ?? 0) +
-    Number(statTotals.elementDamageBonus ?? 0);
+    Number(statTotals.elementDamageBonus ?? 0) +
+    (cassette ? CASSETTE_SET_ELEMENT_BONUS : 0);
 
   const critRate = clamp(Number(character.baseCritRate) + Number(statTotals.critRate ?? 0), 0, 1);
   const critDamage = Math.max(0, Number(character.baseCritDamage) + Number(statTotals.critDamage ?? 0));
   const critExpectation = 1 + critRate * critDamage;
-  const expectedDamage = baseDamage * damageZone * critExpectation;
+  const levelConstant = Math.max(0, Number(damageConstants.levelConstant ?? 0));
+  const enemyDefense = Math.max(0, Number(damageConstants.enemyDefense ?? 0));
+  const baseDefenseCoeff = defenseCoeff(levelConstant, enemyDefense, 0);
+  const defenseCoeffValue = baseDefenseCoeff;
+  const specialZone = 1;
+  const expectedDamage = attributeZone * damageZone * critExpectation * specialZone;
 
   return {
     expectedDamage,
     baseDamage,
+    attributeZone,
     damageZone,
     critExpectation,
+    specialZone,
+    defenseCoeff: defenseCoeffValue,
+    baseDefenseCoeff,
     preferenceCount,
     stats: {
       attack,
       hp,
       defense,
       critRate,
-      critDamage
+      critDamage,
+      ringFusionIntensity: Number(statTotals.ringFusionIntensity ?? 0),
+      tiltIntensity: Number(statTotals.tiltIntensity ?? 0)
     },
     statTotals
   };
@@ -141,4 +167,10 @@ export function itemDamageDelta(context, item) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function defenseCoeff(levelConstant, enemyDefense, defIgnore) {
+  const reducedDefense = enemyDefense * (1 - defIgnore);
+  const denominator = levelConstant + reducedDefense;
+  return denominator > 0 ? levelConstant / denominator : 1;
 }

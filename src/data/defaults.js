@@ -30,6 +30,8 @@ export const STAT_DEFS = [
   { key: "ringFusionIntensity", label: "环合强度", kind: "flat", damageWeight: 0 },
   { key: "genericDamageBonus", label: "通用伤害增强", kind: "percent" },
   { key: "elementDamageBonus", label: "属性伤害增强", kind: "percent", mainOnly: true },
+  { key: "setDamageBonus", label: "套装增伤", kind: "percent", specialOnly: true },
+  { key: "defIgnore", label: "无视防御", kind: "percent", specialOnly: true },
   { key: "healingBonus", label: "治疗加成", kind: "percent", mainOnly: true, damageWeight: 0 },
   { key: "psychicDamageBonus", label: "心灵伤害增强", kind: "percent", mainOnly: true, damageWeight: 0 }
 ];
@@ -51,13 +53,51 @@ export const DRIVE_BLOCK_AFFIX_KEYS = [
 ];
 
 export const CASSETTE_MAIN_AFFIX_KEYS = [
-  ...DRIVE_BLOCK_AFFIX_KEYS,
+  "critRate",
+  "critDamage",
+  "attackPct",
+  "hpPct",
+  "defensePct",
+  "tiltIntensity",
+  "ringFusionIntensity",
   "elementDamageBonus",
   "healingBonus",
   "psychicDamageBonus"
 ];
 
 export const CASSETTE_AFFIX_KEYS = DRIVE_BLOCK_AFFIX_KEYS;
+
+export const CASSETTE_SPECIAL_STAT_KEYS = ["setDamageBonus", "defIgnore"];
+
+export const CASSETTE_SET_ELEMENT_BONUS = 0.1;
+
+export const CHARACTER_PREFERENCE_STAT_KEYS = [
+  "elementDamageBonus",
+  "critRate",
+  "critDamage",
+  "hpPct",
+  "defensePct",
+  "attackPct"
+];
+
+export const DEFAULT_DAMAGE_CONSTANTS = {
+  levelConstant: 1000,
+  enemyDefense: 1000
+};
+
+export const DEFAULT_EFFECTIVE_STATS = {
+  critRate: { enabled: true, weight: 1 },
+  critDamage: { enabled: true, weight: 1 },
+  hpFlat: { enabled: false, weight: 1 },
+  hpPct: { enabled: false, weight: 1 },
+  attackFlat: { enabled: true, weight: 1 },
+  attackPct: { enabled: true, weight: 1 },
+  defenseFlat: { enabled: false, weight: 1 },
+  defensePct: { enabled: false, weight: 1 },
+  tiltIntensity: { enabled: false, weight: 1 },
+  ringFusionIntensity: { enabled: false, weight: 1 },
+  genericDamageBonus: { enabled: true, weight: 1 }
+};
 
 export const RARITIES = [
   { key: "gold", label: "金色", color: "#d6a12b" },
@@ -77,140 +117,128 @@ export const DEFAULT_AFFIX = { statKey: "critRate", value: 0 };
 
 export const DEFAULT_STAT_TABLES = {
   driveBlockBasePerCell: {
-    gold: { attackFlat: 24, hpFlat: 180 },
-    purple: { attackFlat: 18, hpFlat: 135 },
-    blue: { attackFlat: 12, hpFlat: 90 }
+    gold: { attackFlat: 21, hpFlat: 280 },
+    purple: { attackFlat: 16.8, hpFlat: 224 },
+    blue: { attackFlat: 12.6, hpFlat: 168 }
   },
   driveBlockAffixPerCell: {
     gold: {
-      critRate: 0.02,
-      critDamage: 0.04,
-      hpFlat: 180,
-      hpPct: 0.03,
-      attackFlat: 24,
-      attackPct: 0.03,
-      defenseFlat: 21,
-      defensePct: 0.0375,
-      tiltIntensity: 5,
-      ringFusionIntensity: 5,
-      genericDamageBonus: 0.025
-    },
-    purple: {
-      critRate: 0.015,
-      critDamage: 0.03,
-      hpFlat: 135,
-      hpPct: 0.0225,
-      attackFlat: 18,
-      attackPct: 0.0225,
-      defenseFlat: 16,
-      defensePct: 0.028,
-      tiltIntensity: 4,
-      ringFusionIntensity: 4,
-      genericDamageBonus: 0.01875
-    },
-    blue: {
       critRate: 0.01,
       critDamage: 0.02,
-      hpFlat: 90,
-      hpPct: 0.015,
-      attackFlat: 12,
-      attackPct: 0.015,
-      defenseFlat: 11,
-      defensePct: 0.019,
-      tiltIntensity: 3,
-      ringFusionIntensity: 3,
-      genericDamageBonus: 0.0125
+      hpFlat: 100,
+      hpPct: 0.0125,
+      attackFlat: 8,
+      attackPct: 0.0125,
+      defenseFlat: 8,
+      defensePct: 0.0175,
+      tiltIntensity: 6,
+      ringFusionIntensity: 6,
+      genericDamageBonus: 0.01
+    },
+    purple: {
+      critRate: 0.008,
+      critDamage: 0.016,
+      hpFlat: 80,
+      hpPct: 0.01,
+      attackFlat: 6.4,
+      attackPct: 0.01,
+      defenseFlat: 6.4,
+      defensePct: 0.014,
+      tiltIntensity: 4.8,
+      ringFusionIntensity: 4.8,
+      genericDamageBonus: 0.008
+    },
+    blue: {
+      critRate: 0.006,
+      critDamage: 0.012,
+      hpFlat: 60,
+      hpPct: 0.0075,
+      attackFlat: 4.8,
+      attackPct: 0.0075,
+      defenseFlat: 4.8,
+      defensePct: 0.0105,
+      tiltIntensity: 3.6,
+      ringFusionIntensity: 3.6,
+      genericDamageBonus: 0.006
     }
   },
   cassetteMainAffixValues: {
     gold: {
-      critRate: 0.09,
-      critDamage: 0.18,
-      hpFlat: 810,
-      hpPct: 0.135,
-      attackFlat: 108,
-      attackPct: 0.135,
-      defenseFlat: 95,
-      defensePct: 0.16875,
-      tiltIntensity: 23,
-      ringFusionIntensity: 23,
-      genericDamageBonus: 0.1125,
-      elementDamageBonus: 0.18,
-      healingBonus: 0.18,
-      psychicDamageBonus: 0.18
+      critRate: 0.3,
+      critDamage: 0.6,
+      hpPct: 0.375,
+      attackPct: 0.375,
+      defensePct: 0.525,
+      tiltIntensity: 180,
+      ringFusionIntensity: 180,
+      elementDamageBonus: 0.375,
+      healingBonus: 0.345,
+      psychicDamageBonus: 0.375
     },
     purple: {
-      critRate: 0.0675,
-      critDamage: 0.135,
-      hpFlat: 608,
-      hpPct: 0.10125,
-      attackFlat: 81,
-      attackPct: 0.10125,
-      defenseFlat: 72,
-      defensePct: 0.126,
-      tiltIntensity: 18,
-      ringFusionIntensity: 18,
-      genericDamageBonus: 0.084,
-      elementDamageBonus: 0.135,
-      healingBonus: 0.135,
-      psychicDamageBonus: 0.135
+      critRate: 0.24,
+      critDamage: 0.48,
+      hpPct: 0.3,
+      attackPct: 0.3,
+      defensePct: 0.42,
+      tiltIntensity: 144,
+      ringFusionIntensity: 144,
+      elementDamageBonus: 0.3,
+      healingBonus: 0.276,
+      psychicDamageBonus: 0.3
     },
     blue: {
-      critRate: 0.045,
-      critDamage: 0.09,
-      hpFlat: 405,
-      hpPct: 0.0675,
-      attackFlat: 54,
-      attackPct: 0.0675,
-      defenseFlat: 48,
-      defensePct: 0.084,
-      tiltIntensity: 14,
-      ringFusionIntensity: 14,
-      genericDamageBonus: 0.05625,
-      elementDamageBonus: 0.09,
-      healingBonus: 0.09,
-      psychicDamageBonus: 0.09
+      critRate: 0.18,
+      critDamage: 0.36,
+      hpPct: 0.225,
+      attackPct: 0.225,
+      defensePct: 0.315,
+      tiltIntensity: 108,
+      ringFusionIntensity: 108,
+      elementDamageBonus: 0.225,
+      healingBonus: 0.207,
+      psychicDamageBonus: 0.225
     }
   },
   cassetteAffixValues: {
     gold: {
-      critRate: 0.06,
-      critDamage: 0.12,
-      hpFlat: 540,
-      hpPct: 0.09,
-      attackFlat: 72,
-      attackPct: 0.09,
-      defenseFlat: 63,
-      defensePct: 0.1125,
-      tiltIntensity: 15,
-      ringFusionIntensity: 15,
-      genericDamageBonus: 0.075
+      critRate: 0.1,
+      critDamage: 0.2,
+      hpFlat: 1000,
+      hpPct: 0.125,
+      attackFlat: 80,
+      attackPct: 0.125,
+      defenseFlat: 80,
+      defensePct: 0.175,
+      tiltIntensity: 60,
+      ringFusionIntensity: 60,
+      genericDamageBonus: 0.1
     },
     purple: {
-      critRate: 0.045,
-      critDamage: 0.09,
-      hpFlat: 405,
-      hpPct: 0.0675,
-      attackFlat: 54,
-      attackPct: 0.0675,
-      defenseFlat: 48,
-      defensePct: 0.084,
-      tiltIntensity: 12,
-      ringFusionIntensity: 12,
-      genericDamageBonus: 0.056
+      critRate: 0.08,
+      critDamage: 0.16,
+      hpFlat: 800,
+      hpPct: 0.1,
+      attackFlat: 64,
+      attackPct: 0.1,
+      defenseFlat: 64,
+      defensePct: 0.14,
+      tiltIntensity: 48,
+      ringFusionIntensity: 48,
+      genericDamageBonus: 0.08
     },
     blue: {
-      critRate: 0.03,
-      critDamage: 0.06,
-      hpFlat: 270,
-      hpPct: 0.045,
-      attackFlat: 36,
-      attackPct: 0.045,
-      defenseFlat: 32,
-      defensePct: 0.056,
-      tiltIntensity: 9,
-      ringFusionIntensity: 9,
-      genericDamageBonus: 0.0375
+      critRate: 0.06,
+      critDamage: 0.12,
+      hpFlat: 600,
+      hpPct: 0.075,
+      attackFlat: 48,
+      attackPct: 0.075,
+      defenseFlat: 48,
+      defensePct: 0.105,
+      tiltIntensity: 36,
+      ringFusionIntensity: 36,
+      genericDamageBonus: 0.06
     }
   }
 };
@@ -466,6 +494,7 @@ export const DEFAULT_CASSETTES = [
     rarity: "gold",
     enabled: true,
     mainAffix: { statKey: "elementDamageBonus", value: 0.18 },
+    specialStats: { setDamageBonus: 0, defIgnore: 0 },
     affixes: makeAffixes([
       { statKey: "critRate", value: 0.06 },
       { statKey: "critDamage", value: 0.12 },
@@ -479,6 +508,7 @@ export const DEFAULT_CASSETTES = [
     rarity: "purple",
     enabled: true,
     mainAffix: { statKey: "critDamage", value: 0.2 },
+    specialStats: { setDamageBonus: 0, defIgnore: 0 },
     affixes: makeAffixes([
       { statKey: "critRate", value: 0.05 },
       { statKey: "attackPct", value: 0.08 },

@@ -1,9 +1,12 @@
 import {
   CASSETTE_AFFIX_KEYS,
   CASSETTE_MAIN_AFFIX_KEYS,
+  CASSETTE_SPECIAL_STAT_KEYS,
+  CHARACTER_PREFERENCE_STAT_KEYS,
   DEFAULT_CASSETTES,
   DEFAULT_CHARACTERS,
   DEFAULT_DRIVE_BLOCKS,
+  DEFAULT_EFFECTIVE_STATS,
   DEFAULT_STAT_TABLES,
   DEFAULT_WEAPONS,
   DRIVE_BLOCK_AFFIX_KEYS,
@@ -35,6 +38,7 @@ export function createDefaultState() {
       defenseMultiplier: 0,
       extraDamage: 0
     },
+    effectiveStats: structuredClone(DEFAULT_EFFECTIVE_STATS),
     invalidStats: ["hpPct", "hpFlat", "defensePct", "defenseFlat"],
     topN: 5,
     branchLimit: 100000
@@ -86,13 +90,15 @@ export function migrateState(value = {}) {
       ...fallback.board,
       ...(value.board ?? {})
     },
-    characters: Array.isArray(value.characters) ? value.characters : fallback.characters,
+    characters: Array.isArray(value.characters)
+      ? value.characters.map(migrateCharacter)
+      : fallback.characters,
     weapons: Array.isArray(value.weapons) ? value.weapons : fallback.weapons,
     driveBlocks: driveBlockSource.map(migrateDriveBlock),
     cassettes: Array.isArray(value.cassettes)
       ? value.cassettes.map(migrateCassette)
       : fallback.cassettes,
-    statTables: mergeStatTables(fallback.statTables, value.statTables),
+    statTables: structuredClone(DEFAULT_STAT_TABLES),
     requiredShapes: Array.isArray(value.requiredShapes)
       ? value.requiredShapes.filter(Boolean)
       : fallback.requiredShapes,
@@ -106,6 +112,7 @@ export function migrateState(value = {}) {
     invalidStats: Array.isArray(value.invalidStats)
       ? value.invalidStats.filter((key) => DRIVE_BLOCK_AFFIX_KEYS.includes(key) || CASSETTE_MAIN_AFFIX_KEYS.includes(key))
       : fallback.invalidStats,
+    effectiveStats: normalizeEffectiveStats(value.effectiveStats, value.invalidStats),
     topN: Number(value.topN) || fallback.topN,
     branchLimit: Number(value.branchLimit) || fallback.branchLimit
   };
@@ -163,15 +170,32 @@ function migrateDriveBlock(item) {
   return migrated;
 }
 
+function migrateCharacter(item = {}) {
+  const preference = item.preference ?? {};
+  return {
+    ...item,
+    preference: {
+      ...preference,
+      shapeKind: ["II", "III", "IV"].includes(preference.shapeKind) ? preference.shapeKind : "III",
+      stat: CHARACTER_PREFERENCE_STAT_KEYS.includes(preference.stat) ? preference.stat : "critRate",
+      value: Number.isFinite(Number(preference.value)) ? Number(preference.value) : 0
+    }
+  };
+}
+
 function migrateCassette(item) {
   const mainAffix = normalizeAffix(item.mainAffix, CASSETTE_MAIN_AFFIX_KEYS);
   const { affixes, legacyStats } = migrateAffixes(item.affixes, item.stats, CASSETTE_AFFIX_KEYS);
+  for (const key of CASSETTE_SPECIAL_STAT_KEYS) {
+    delete legacyStats[key];
+  }
   const migrated = {
     id: item.id,
     name: item.name || "卡带",
     rarity: item.rarity || "gold",
     enabled: Boolean(item.enabled ?? true),
     mainAffix,
+    specialStats: normalizeSpecialStats(item.specialStats ?? item.stats),
     affixes
   };
   if (Object.keys({ ...(item.legacyStats ?? {}), ...legacyStats }).length) {
@@ -210,7 +234,8 @@ function migrateAffixes(affixes, stats, allowedKeys) {
 }
 
 function normalizeAffix(affix, allowedKeys) {
-  const statKey = allowedKeys.includes(affix?.statKey) ? affix.statKey : allowedKeys[0];
+  const normalizedStatKey = normalizeStatKey(affix?.statKey);
+  const statKey = allowedKeys.includes(normalizedStatKey) ? normalizedStatKey : allowedKeys[0];
   const value = Number(affix?.value ?? 0);
   return {
     statKey,
@@ -218,8 +243,29 @@ function normalizeAffix(affix, allowedKeys) {
   };
 }
 
+function normalizeEffectiveStats(value, invalidStats = []) {
+  const invalid = new Set(Array.isArray(invalidStats) ? invalidStats : []);
+  const result = structuredClone(DEFAULT_EFFECTIVE_STATS);
+  for (const key of DRIVE_BLOCK_AFFIX_KEYS) {
+    const saved = value?.[key];
+    const enabled = typeof saved?.enabled === "boolean" ? saved.enabled : !invalid.has(key);
+    const weight = Number(saved?.weight ?? result[key]?.weight ?? 1);
+    result[key] = {
+      enabled,
+      weight: Number.isFinite(weight) && weight > 0 ? weight : 1
+    };
+  }
+  return result;
+}
+
 function mergeLegacyStats(stats) {
   const merged = { ...stats };
+  if (merged.cycleIntensity && !merged.ringFusionIntensity) {
+    merged.ringFusionIntensity = merged.cycleIntensity;
+  } else if (merged.cycleIntensity) {
+    merged.ringFusionIntensity = Number(merged.ringFusionIntensity ?? 0) + Number(merged.cycleIntensity ?? 0);
+  }
+  delete merged.cycleIntensity;
   const genericTotal =
     Number(merged.genericDamageBonus ?? 0) +
     Number(merged.typedDamageBonus ?? 0) +
@@ -232,4 +278,17 @@ function mergeLegacyStats(stats) {
   delete merged.sourceDamageBonus;
   delete merged.otherDamageBonus;
   return merged;
+}
+
+function normalizeSpecialStats(stats = {}) {
+  const normalized = {};
+  for (const key of CASSETTE_SPECIAL_STAT_KEYS) {
+    const value = Number(stats?.[key] ?? 0);
+    normalized[key] = Number.isFinite(value) ? value : 0;
+  }
+  return normalized;
+}
+
+function normalizeStatKey(statKey) {
+  return statKey === "cycleIntensity" ? "ringFusionIntensity" : statKey;
 }

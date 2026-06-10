@@ -34,10 +34,20 @@ export type StatKey =
   | "ringFusionIntensity"
   | "genericDamageBonus"
   | "elementDamageBonus"
+  | "setDamageBonus"
+  | "defIgnore"
   | "healingBonus"
   | "psychicDamageBonus";
 
 export type StatMap = Partial<Record<StatKey, number>>;
+
+export type CharacterPreferenceStatKey =
+  | "elementDamageBonus"
+  | "critRate"
+  | "critDamage"
+  | "hpPct"
+  | "defensePct"
+  | "attackPct";
 
 export type Affix = {
   statKey: StatKey;
@@ -54,7 +64,7 @@ export type DriveBlockShape = {
 
 export type CharacterPreference = {
   shapeKind: ShapeKind;
-  stat: StatKey;
+  stat: CharacterPreferenceStatKey;
   value: number;
 };
 
@@ -94,8 +104,14 @@ export type Cassette = {
   rarity: Rarity;
   enabled: boolean;
   mainAffix: Affix;
+  specialStats?: Pick<StatMap, "setDamageBonus" | "defIgnore">;
   affixes: [Affix, Affix, Affix, Affix];
   legacyStats?: Record<string, number>;
+};
+
+export type EffectiveStatConfig = {
+  enabled: boolean;
+  weight: number;
 };
 
 export type SkillProfile = {
@@ -121,6 +137,7 @@ export type AppState = {
   selectedCharacterId: string;
   selectedWeaponId: string;
   skill: SkillProfile;
+  effectiveStats: Partial<Record<StatKey, EffectiveStatConfig>>;
   invalidStats: StatKey[];
   topN: number;
   branchLimit: number;
@@ -136,8 +153,12 @@ export type StatTables = {
 export type DamageBreakdown = {
   expectedDamage: number;
   baseDamage: number;
+  attributeZone: number;
   damageZone: number;
   critExpectation: number;
+  specialZone: number;
+  defenseCoeff: number;
+  baseDefenseCoeff: number;
   preferenceCount: number;
   stats: {
     attack: number;
